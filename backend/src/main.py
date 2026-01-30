@@ -4,10 +4,46 @@ from pydantic import BaseModel
 from src.agents import LinkedInCrew, post_to_linkedin
 from src.models import GeneratedPost
 import uuid
+import re
 from typing import List
 from dotenv import load_dotenv
 import logging
 import os
+
+
+def parse_posts(raw_output: str) -> List[dict]:
+    """Parse the LLM output and split into individual posts."""
+    posts = []
+
+    # Split by --- or ## POST patterns
+    sections = re.split(r'\n---\n|\n-{3,}\n', raw_output)
+
+    for section in sections:
+        section = section.strip()
+        if not section:
+            continue
+
+        # Check if this section has a post header
+        post_match = re.match(r'##\s*POST\s*\d+[:\s]*(.+?)(?:\n|$)', section, re.IGNORECASE)
+
+        if post_match:
+            title = post_match.group(1).strip()
+            # Get content after the header
+            content = section[post_match.end():].strip()
+        else:
+            # No header, use first line as title or generic
+            lines = section.split('\n', 1)
+            title = lines[0].strip()[:50] if lines[0].strip() else "Generated Post"
+            content = lines[1].strip() if len(lines) > 1 else section
+
+        # Skip if content is too short or just metadata
+        if len(content) > 50:
+            posts.append({
+                "title": title,
+                "content": content
+            })
+
+    return posts
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -45,24 +81,46 @@ def health_check():
 @app.post("/generate")
 def generate_posts():
     """
-    Triggers the CrewAI agentic workflow to generate posts.
+    Triggers the agentic workflow to generate posts.
     """
     logger.info("Received generation request")
     try:
         crew = LinkedInCrew()
         result = crew.run()
-        
+
         logger.info("Workflow completed successfully")
-        
-        new_post = GeneratedPost(
-            id=str(uuid.uuid4()),
-            content=str(result),
-            status="pending",
-            analysis_reference="Full Run Analysis"
-        )
-        post_queue.append(new_post)
-        
-        return {"message": "Workflow completed", "result": result, "queue_id": new_post.id}
+
+        # Parse the result into individual posts
+        parsed_posts = parse_posts(str(result))
+        new_ids = []
+
+        if parsed_posts:
+            for i, post_data in enumerate(parsed_posts):
+                new_post = GeneratedPost(
+                    id=str(uuid.uuid4()),
+                    content=post_data["content"],
+                    status="pending",
+                    analysis_reference=post_data["title"]
+                )
+                post_queue.append(new_post)
+                new_ids.append(new_post.id)
+                logger.info(f"Created post {i+1}: {post_data['title'][:30]}...")
+        else:
+            # Fallback: store as single post if parsing fails
+            new_post = GeneratedPost(
+                id=str(uuid.uuid4()),
+                content=str(result),
+                status="pending",
+                analysis_reference="Generated Post"
+            )
+            post_queue.append(new_post)
+            new_ids.append(new_post.id)
+
+        return {
+            "message": f"Generated {len(new_ids)} posts",
+            "post_count": len(new_ids),
+            "queue_ids": new_ids
+        }
     except Exception as e:
         logger.error(f"Error during generation: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
