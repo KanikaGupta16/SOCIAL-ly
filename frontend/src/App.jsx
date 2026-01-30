@@ -85,7 +85,7 @@ function App() {
       case 'profile':
         return <Profile userData={userData} />;
       case 'production-studio':
-        return <OutputPanel post={selectedPost} />;
+        return <OutputPanel post={selectedPost} onBack={() => setCurrentView('ready-posts')} />;
       default:
         return <div>View not found</div>;
     }

@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from src.agents import LinkedInCrew, post_to_linkedin
 from src.models import GeneratedPost
@@ -23,6 +24,15 @@ if not os.getenv("SIM_API_KEY"):
     logger.warning("SIM_API_KEY is missing in .env file! LinkedIn posting will fail.")
 
 app = FastAPI(title="LinkedIn Automation Bot")
+
+# CORS for frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # In-memory storage
 post_queue: List[GeneratedPost] = []
